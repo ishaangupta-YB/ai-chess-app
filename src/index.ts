@@ -1,26 +1,68 @@
-/**
- * Welcome to Cloudflare Workers! This is your first worker.
- *
- * - Run `npm run dev` in your terminal to start a development server
- * - Open a browser tab at http://localhost:8787/ to see your worker in action
- * - Run `npm run deploy` to publish your worker
- *
- * Bind resources to your worker in `wrangler.jsonc`. After adding bindings, a type definition for the
- * `Env` object can be regenerated with `npm run cf-typegen`.
- *
- * Learn more at https://developers.cloudflare.com/workers/
- */
+import { createMcpHandler } from "agents/mcp";
+import { routeAgentRequest } from "agents";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { env } from "cloudflare:workers";
+
+const getWidgetHtml = async (host: string) => {
+  let html = await (await env.ASSETS.fetch("http://localhost/")).text();
+  html = html.replace(
+    "<!--RUNTIME_CONFIG-->",
+    `<script>window.HOST = \`${host}\`;</script>`
+  );
+  return html;
+};
+
+const server = new McpServer({ name: "Chess", version: "v1.0.0" });
+
+// Register a UI resource that ChatGPT can render
+server.registerResource(
+  "chess",
+  "ui://widget/index.html",
+  {},
+  async (_uri, extra) => {
+    return {
+      contents: [
+        {
+          uri: "ui://widget/index.html",
+          mimeType: "text/html+skybridge",
+          text: await getWidgetHtml(extra.requestInfo?.headers.host as string)
+        }
+      ]
+    };
+  }
+);
+
+// Register a tool that ChatGPT can call to render the UI
+server.registerTool(
+  "playChess",
+  {
+    title: "Renders a chess game menu, ready to start or join a game.",
+    annotations: { readOnlyHint: true },
+    _meta: {
+      "openai/outputTemplate": "ui://widget/index.html",
+      "openai/toolInvocation/invoking": "Opening chess widget",
+      "openai/toolInvocation/invoked": "Chess widget opened"
+    }
+  },
+  async (_, _extra) => {
+    return {
+      content: [{ type: "text", text: "Successfully rendered chess game menu" }]
+    };
+  }
+);
+
+const mcpHandler = createMcpHandler(server);
 
 export default {
-	async fetch(request, env, ctx): Promise<Response> {
-		const url = new URL(request.url);
-		switch (url.pathname) {
-			case '/message':
-				return new Response('Hello, World!');
-			case '/random':
-				return new Response(crypto.randomUUID());
-			default:
-				return new Response('Not Found', { status: 404 });
-		}
-	},
-} satisfies ExportedHandler<Env>;
+  async fetch(req: Request, env: Env, ctx: ExecutionContext) {
+    const url = new URL(req.url);
+    if (url.pathname.startsWith("/mcp")) return mcpHandler(req, env, ctx);
+
+    return (
+      (await routeAgentRequest(req, env)) ??
+      new Response("Not found", { status: 404 })
+    );
+  }
+};
+
+export { ChessGame } from "./chess";
