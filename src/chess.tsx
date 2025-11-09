@@ -24,7 +24,10 @@ export class ChessGame extends Agent<Env, State> {
 
   game = new Chess();
 
-  constructor(ctx: DurableObjectState, public env: Env) {
+  constructor(
+    ctx: DurableObjectState,
+    public env: Env
+  ) {
     super(ctx, env);
     this.game.load(this.state.board);
   }
@@ -68,10 +71,32 @@ export class ChessGame extends Agent<Env, State> {
   }
 
   @callable()
+  leave() {
+    const { connection } = getCurrentAgent();
+    if (!connection) throw new Error("Not connected");
+
+    const { playerId } = connection.state as ConnectionState;
+
+    const seat = this.colorOf(playerId);
+    if (!seat) return { ok: true, state: this.state };
+    this.state.players[seat] = undefined;
+    this.state.status = "waiting";
+    this.setState(this.state);
+    return { ok: true, state: this.state };
+  }
+
+  @callable()
   move(
     move: { from: string; to: string; promotion?: string },
     expectedFen?: string
-  ) {
+  ): {
+    ok: boolean;
+    reason?: string;
+    fen: string;
+    san?: string;
+    status: State["status"];
+  } {
+    // check there are 2 players
     if (this.state.status === "waiting") {
       return {
         ok: false,
@@ -86,14 +111,13 @@ export class ChessGame extends Agent<Env, State> {
     const { playerId } = connection.state as ConnectionState;
 
     const seat = this.colorOf(playerId);
-    if (!seat) {
+    if (!seat)
       return {
         ok: false,
         reason: "not-in-game",
         fen: this.game.fen(),
         status: this.state.status
       };
-    }
 
     if (seat !== this.game.turn()) {
       return {
@@ -134,7 +158,8 @@ export class ChessGame extends Agent<Env, State> {
       board: fen,
       lastSan: res.san,
       status,
-      winner: status === "mate" ? (this.game.turn() === "w" ? "b" : "w") : undefined
+      winner:
+        status === "mate" ? (this.game.turn() === "w" ? "b" : "w") : undefined
     });
 
     return { ok: true, fen, san: res.san, status };
