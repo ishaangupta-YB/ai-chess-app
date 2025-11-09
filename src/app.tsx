@@ -155,9 +155,11 @@ function App() {
           </div>
           <div style={{ background: "#fff", padding: "16px", borderRadius: "16px" }}>
             <Chessboard
-              position={fen}
-              onPieceDrop={onPieceDrop}
-              boardOrientation={myColor === "b" ? "black" : "white"}
+              options={{
+                position: fen,
+                onPieceDrop: onPieceDrop,
+                boardOrientation: myColor === "b" ? "black" : "white"
+              }}
             />
           </div>
         </div>
